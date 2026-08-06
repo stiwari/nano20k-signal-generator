@@ -1,0 +1,17 @@
+# Gowin generated build output
+impl/
+
+# Gowin per-user IDE settings
+*.gprj.user
+
+# macOS
+.DS_Store
+
+# Simulation output
+*.vcd
+*.fst
+*.out
+
+# Temporary files
+*~
+*.swp

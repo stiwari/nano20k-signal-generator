@@ -92,11 +92,6 @@ module signal_generator_top (
         .tx_done  (tx_done)
     );
 
-    //--------------------------------------------------
-    // Diagnostic:
-    // transmit the low nibble of rx_data as one
-    // hexadecimal ASCII character
-    //--------------------------------------------------
 //--------------------------------------------------
 // Echo controller FSM
 //--------------------------------------------------
@@ -127,43 +122,32 @@ always @(posedge clk_27m or negedge reset_n) begin
 
         case(state)
 
-        //------------------------------------------
-        ST_IDLE:
-        //------------------------------------------
+				ST_IDLE: begin
+					if (rx_valid) begin
+						pending_byte <= rx_data;
+						state <= ST_LOAD;
+					end
+				end
 
-        begin
-            if (rx_valid) begin
-                pending_byte <= rx_data;
-                state <= ST_LOAD;
-            end
-        end
+				ST_LOAD: begin
+					tx_data <= pending_byte;
+					state   <= ST_START;
+				end
 
-        //------------------------------------------
-        ST_LOAD:
-        //------------------------------------------
+				ST_START: begin
+					tx_start <= 1'b1;
+					state    <= ST_WAIT;
+				end
 
-        begin
-            tx_data <= pending_byte;
-            state   <= ST_START;
-        end
+				ST_WAIT: begin
+					if (tx_done)
+						state <= ST_IDLE;
+				end
 
-        //------------------------------------------
-        ST_START:
-        //------------------------------------------
-
-        begin
-            tx_start <= 1'b1;
-            state    <= ST_WAIT;
-        end
-
-        //------------------------------------------
-        ST_WAIT:
-        //------------------------------------------
-
-        begin
-            if (tx_done)
-                state <= ST_IDLE;
-        end
+				default: begin
+				   state <= ST_IDLE;
+				   tx_start <= 1'b0;
+				end
 
         endcase
 
@@ -171,25 +155,6 @@ always @(posedge clk_27m or negedge reset_n) begin
 
 end
 
-/*    always @(posedge clk_27m or negedge reset_n) begin
-        if (!reset_n) begin
-            tx_data  <= "0";
-            tx_start <= 1'b0;
-        end else begin
-            // Default low so tx_start lasts one clock.
-            tx_start <= 1'b0;
-
-            if (rx_valid && !tx_busy) begin
-                if (rx_data[3:0] < 4'd10)
-                    tx_data <= "0" + rx_data[3:0];
-                else
-                    tx_data <= "A" + (rx_data[3:0] - 4'd10);
-
-                tx_start <= 1'b1;
-            end
-        end
-    end
-*/
     //--------------------------------------------------
     // LED indicator
     //--------------------------------------------------

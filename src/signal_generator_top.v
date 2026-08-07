@@ -7,15 +7,60 @@ module signal_generator_top (
     output wire test_led
 );
 
-    localparam [31:0] UART_16X_INCREMENT = 32'd293203101;
+    localparam [31:0] UART_16X_INCREMENT = 32'd293_203_101;
+
+    localparam [1:0]
+        ST_IDLE  = 2'd0,
+        ST_LOAD  = 2'd1,
+        ST_START = 2'd2,
+        ST_WAIT  = 2'd3;
+
+    localparam [31:0] AUDIO_SAMPLE_INCREMENT = 32'd7_635_497;
 
     //--------------------------------------------------
+    // Signal declarations
+    //--------------------------------------------------
+
+    reg  [7:0] reset_counter = 8'd0;
+    wire       reset_n;
+
+// uart 
+    wire       uart_rx_sync;
+    wire       tick_16x;
+    wire [7:0] rx_data;
+    wire       rx_valid;
+    wire       framing_error;
+    reg  [7:0] tx_data;
+    reg        tx_start;
+    wire       tx_busy;
+    wire       tx_done;
+
+//parser from keyboard
+    wire [31:0] parsed_frequency;
+    wire        parsed_valid;
+    wire        command_error;
+    reg [31:0] frequency_hz;
+
+// uart test with echo
+    reg [1:0] echo_state;
+    reg [7:0] echo_pending_byte;
+
+    // dds stuff
+    wire [31:0] dds_phase_inc_new;
+    wire        dds_phase_inc_valid;
+    reg  [31:0] dds_phase_inc;
+
+    wire        sample_ce;
+    wire [31:0] dds_phase;
+    wire [7:0]  dds_rom_addr;
+    wire signed [15:0] sine_sample;
+
+    // pwm for led, to see audio waves, no speaker at hand 
+    reg [7:0] pwm_counter;
+    wire [7:0] brightness;
+    assign brightness = sine_sample[15:8] + 8'd128;
+
     // Startup reset
-    //--------------------------------------------------
-
-    reg [7:0] reset_counter = 8'd0;
-    wire reset_n;
-
     always @(posedge clk_27m) begin
         if (reset_counter != 8'hFF)
             reset_counter <= reset_counter + 1'b1;
@@ -23,12 +68,7 @@ module signal_generator_top (
 
     assign reset_n = (reset_counter == 8'hFF);
 
-    //--------------------------------------------------
     // Synchronize asynchronous UART RX input
-    //--------------------------------------------------
-
-    wire uart_rx_sync;
-
     synchronizer #(
         .RESET_VALUE(1'b1)
     ) rx_sync_inst (
@@ -38,30 +78,27 @@ module signal_generator_top (
         .sync_out (uart_rx_sync)
     );
 
-    //--------------------------------------------------
-    // Generate 16x UART oversampling tick
-    //--------------------------------------------------
-
-    wire tick_16x;
-    wire [31:0] tick_accumulator;
-
+    // 16x115200 UART oversampling tick
     fractional_tick #(
         .INCREMENT(UART_16X_INCREMENT)
     ) uart_tick_inst (
         .clk         (clk_27m),
         .reset_n     (reset_n),
         .tick        (tick_16x),
-        .accumulator (tick_accumulator)
+        .accumulator ()
     );
 
-    //--------------------------------------------------
+    // 48 kHz audio sample enable
+    fractional_tick #(
+        .INCREMENT(AUDIO_SAMPLE_INCREMENT)
+    ) audio_sample_tick (
+        .clk         (clk_27m),
+        .reset_n     (reset_n),
+        .tick        (sample_ce),
+        .accumulator ()
+    );
+
     // UART receiver
-    //--------------------------------------------------
-
-    wire [7:0] rx_data;
-    wire       rx_valid;
-    wire       framing_error;
-
     uart_rx rx_inst (
         .clk           (clk_27m),
         .reset_n       (reset_n),
@@ -72,15 +109,7 @@ module signal_generator_top (
         .framing_error (framing_error)
     );
 
-    //--------------------------------------------------
     // UART transmitter
-    //--------------------------------------------------
-
-    reg  [7:0] tx_data;
-    reg        tx_start;
-    wire       tx_busy;
-    wire       tx_done;
-
     uart_tx tx_inst (
         .clk      (clk_27m),
         .reset_n  (reset_n),
@@ -92,82 +121,110 @@ module signal_generator_top (
         .tx_done  (tx_done)
     );
 
-//--------------------------------------------------
-// Echo controller FSM
-//--------------------------------------------------
+    // Command parser
+    command_parser parser_inst (
+        .clk             (clk_27m),
+        .reset_n         (reset_n),
+        .rx_data         (rx_data),
+        .rx_valid        (rx_valid),
+        .frequency_hz    (parsed_frequency),
+        .frequency_valid (parsed_valid),
+        .command_error   (command_error)
+    );
 
-localparam
-    ST_IDLE     = 2'd0,
-    ST_LOAD     = 2'd1,
-    ST_START    = 2'd2,
-    ST_WAIT     = 2'd3;
+    // Echo controller FSM
+    always @(posedge clk_27m or negedge reset_n) begin
+        if (!reset_n) begin
+            echo_state        <= ST_IDLE;
+            echo_pending_byte <= 8'd0;
+            tx_data      <= 8'd0;
+            tx_start     <= 1'b0;
+        end else begin
+            tx_start <= 1'b0;
 
-reg [1:0] state;
-reg [7:0] pending_byte;
+            case (echo_state)
+                ST_IDLE: begin
+                    if (rx_valid) begin
+                        echo_pending_byte <= rx_data;
+                        echo_state        <= ST_LOAD;
+                    end
+                end
 
+                ST_LOAD: begin
+                    tx_data <= echo_pending_byte;
+                    echo_state   <= ST_START;
+                end
+
+                ST_START: begin
+                    tx_start <= 1'b1;
+                    echo_state    <= ST_WAIT;
+                end
+
+                ST_WAIT: begin
+                    if (tx_done)
+                        echo_state <= ST_IDLE;
+                end
+
+                default: begin
+                    echo_state    <= ST_IDLE;
+                    tx_start <= 1'b0;
+                end
+            endcase
+        end
+    end
+
+// Frequency register
 always @(posedge clk_27m or negedge reset_n) begin
-
-    if (!reset_n) begin
-
-        state        <= ST_IDLE;
-        pending_byte <= 8'd0;
-
-        tx_data      <= 8'd0;
-        tx_start     <= 1'b0;
-
-    end
-    else begin
-
-        tx_start <= 1'b0;
-
-        case(state)
-
-				ST_IDLE: begin
-					if (rx_valid) begin
-						pending_byte <= rx_data;
-						state <= ST_LOAD;
-					end
-				end
-
-				ST_LOAD: begin
-					tx_data <= pending_byte;
-					state   <= ST_START;
-				end
-
-				ST_START: begin
-					tx_start <= 1'b1;
-					state    <= ST_WAIT;
-				end
-
-				ST_WAIT: begin
-					if (tx_done)
-						state <= ST_IDLE;
-				end
-
-				default: begin
-				   state <= ST_IDLE;
-				   tx_start <= 1'b0;
-				end
-
-        endcase
-
-    end
-
+    if (!reset_n)
+        frequency_hz <= 32'd1;
+    else if (parsed_valid && (parsed_frequency != 32'd0))
+        frequency_hz <= parsed_frequency;
 end
 
-    //--------------------------------------------------
-    // LED indicator
-    //--------------------------------------------------
-    //
-    // Tang Nano 20K LED is active-low.
-    //
-    // LED turns on briefly while:
-    // - a received byte is valid
-    // - the transmitter is busy
-    // - a framing error occurs
-    //--------------------------------------------------
+// convert to phase
+frequency_to_phase #(
+    .SAMPLE_RATE_HZ(48_000)
+) dds_frequency_converter (
+    .clk             (clk_27m),
+    .reset_n         (reset_n),
+    .frequency_hz    (frequency_hz),
+    .frequency_valid (parsed_valid),
+    .phase_inc       (dds_phase_inc_new),
+    .phase_inc_valid (dds_phase_inc_valid)
+);
 
-    assign test_led =
-        ~(rx_valid | tx_busy | framing_error);
+// DDS / NCO
+waveform_dds dds_inst (
+    .clk       (clk_27m),
+    .reset_n   (reset_n),
+    .sample_ce (sample_ce),
+    .phase_inc (dds_phase_inc),
+    .phase     (dds_phase),
+    .rom_addr  (dds_rom_addr),
+    .sample    (sine_sample)
+);
+
+// DDS tuning-word register
+always @(posedge clk_27m or negedge reset_n) begin
+    if (!reset_n)
+        dds_phase_inc <= 32'd62634940;   // 700 Hz default
+    else if (dds_phase_inc_valid)
+        dds_phase_inc <= dds_phase_inc_new;
+end
+
+
+always @(posedge clk_27m or negedge reset_n) begin
+    if (!reset_n)
+        pwm_counter <= 8'd0;
+    else
+        pwm_counter <= pwm_counter + 1'b1;
+end
+
+assign test_led =
+    (brightness == 8'd0)   ? 1'b1 :   // completely OFF
+    (brightness == 8'hFF)  ? 1'b0 :   // completely ON
+    ~(pwm_counter < brightness);
+//assign test_led = ~(pwm_counter < brightness);
+
 
 endmodule

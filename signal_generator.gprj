@@ -5,16 +5,16 @@
     <Version>5</Version>
     <Device name="GW2AR-18C" pn="GW2AR-LV18QN88C7/I6">gw2ar18c-001</Device>
     <FileList>
-        <File path="src/command_parser.v" type="file.verilog" enable="1"/>
-        <File path="src/fractional_tick.v" type="file.verilog" enable="1"/>
-        <File path="src/frequency_to_phase.v" type="file.verilog" enable="1"/>
         <File path="src/signal_generator_top.v" type="file.verilog" enable="1"/>
-        <File path="src/sine_rom.v" type="file.verilog" enable="1"/>
-        <File path="src/synchronizer.v" type="file.verilog" enable="1"/>
-        <File path="src/uart_rx.v" type="file.verilog" enable="1"/>
-        <File path="src/uart_tx.v" type="file.verilog" enable="1"/>
-        <File path="src/waveform_dds.v" type="file.verilog" enable="1"/>
-        <File path="src/signal_generator.cst" type="file.cst" enable="1"/>
-        <File path="src/signal_generator.sdc" type="file.sdc" enable="1"/>
+        <File path="src/common/synchronizer.v" type="file.verilog" enable="1"/>
+        <File path="src/common/fractional_tick.v" type="file.verilog" enable="1"/>
+        <File path="src/dds/frequency_to_phase.v" type="file.verilog" enable="1"/>
+        <File path="src/dds/waveform_dds.v" type="file.verilog" enable="1"/>
+        <File path="src/dds/sine_rom.v" type="file.verilog" enable="1"/>
+        <File path="src/uart/command_parser.v" type="file.verilog" enable="1"/>
+        <File path="src/uart/uart_rx.v" type="file.verilog" enable="1"/>
+        <File path="src/uart/uart_tx.v" type="file.verilog" enable="1"/>
+        <File path="constraints/signal_generator.cst" type="file.cst" enable="1"/>
+        <File path="constraints/signal_generator.sdc" type="file.sdc" enable="1"/>
     </FileList>
 </Project>

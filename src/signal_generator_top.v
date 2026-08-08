@@ -4,7 +4,11 @@ module signal_generator_top (
     input  wire clk_27m,
     input  wire uart_rx_pin,
     output wire uart_tx_pin,
-    output wire test_led
+    output wire test_led,
+    output wire audio_enable,
+    output wire i2s_data,
+    output wire i2s_lrck,
+    output wire i2s_bclk
 );
 
     localparam [31:0] UART_16X_INCREMENT = 32'd293_203_101;
@@ -55,11 +59,11 @@ module signal_generator_top (
     wire [7:0]  dds_rom_addr;
     wire signed [15:0] sine_sample;
 
-    // pwm for led, to see audio waves, no speaker at hand 
-    reg [7:0] pwm_counter;
-    wire [7:0] brightness;
-    assign brightness = sine_sample[15:8] + 8'd128;
+// i2s stuff to drive MAX for speaker
+    localparam [31:0] I2S_HALF_BCLK_INCREMENT =
+        32'd977_343_669;
 
+    wire i2s_half_bclk_ce;
     // Startup reset
     always @(posedge clk_27m) begin
         if (reset_counter != 8'hFF)
@@ -98,6 +102,16 @@ module signal_generator_top (
         .accumulator ()
     );
 
+    // for speaker
+    fractional_tick #(
+        .INCREMENT(I2S_HALF_BCLK_INCREMENT)
+    ) i2s_bclk_tick_inst (
+        .clk         (clk_27m),
+        .reset_n     (reset_n),
+        .tick        (i2s_half_bclk_ce),
+        .accumulator ()
+    );
+
     // UART receiver
     uart_rx rx_inst (
         .clk           (clk_27m),
@@ -130,6 +144,17 @@ module signal_generator_top (
         .frequency_hz    (parsed_frequency),
         .frequency_valid (parsed_valid),
         .command_error   (command_error)
+    );
+
+    // i2S to drive the MAXnnnn audio amplifier chip
+    i2s_tx i2s_tx_inst (
+        .clk              (clk_27m),
+        .reset_n          (reset_n),
+        .i2s_half_bclk_ce (i2s_half_bclk_ce),
+        .sample           (sine_sample),
+        .i2s_bclk         (i2s_bclk),
+        .i2s_lrck         (i2s_lrck),
+        .i2s_data         (i2s_data)
     );
 
     // Echo controller FSM
@@ -213,18 +238,19 @@ always @(posedge clk_27m or negedge reset_n) begin
 end
 
 
+// led pwm code
+reg [6:0] led_divider;
+
 always @(posedge clk_27m or negedge reset_n) begin
     if (!reset_n)
-        pwm_counter <= 8'd0;
-    else
-        pwm_counter <= pwm_counter + 1'b1;
+        led_divider <= 7'd0;
+    else if (sample_ce) begin
+        if ((dds_phase + dds_phase_inc) < dds_phase)
+            led_divider <= led_divider + 1'b1;
+    end
 end
 
-assign test_led =
-    (brightness == 8'd0)   ? 1'b1 :   // completely OFF
-    (brightness == 8'hFF)  ? 1'b0 :   // completely ON
-    ~(pwm_counter < brightness);
-//assign test_led = ~(pwm_counter < brightness);
-
+assign test_led = ~led_divider[6];
+assign audio_enable = 1'b1;
 
 endmodule

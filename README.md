@@ -6,6 +6,8 @@ Usage:
 3. Run "$screen /dev/cu.usbserial123456 115200" (yeah I set the uart speed as 115200, you can change it)
 4. Enter F or f, followed by a number from 1-nnn, e.g. f700 == generate 700hz
 
+Here are the verilog modules starting from laptop connecting over USB (UART at 115200bps), and sending a command like f700 to sound coming from the speaker
+
 UART: F700
 
    ↓

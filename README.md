@@ -7,36 +7,47 @@ Usage:
 4. Enter F or f, followed by a number from 1-nnn, e.g. f700 == generate 700hz
 
 UART: F700
+
    ↓
    
 command_parser
+
    ↓
    
 frequency_hz
+   
    ↓
    
 frequency_to_phase
+   
    ↓
    
 phase_inc
+   
    ↓
    
 DDS / NCO @ 48 kHz
+   
    ↓
    
 sine ROM
+   
    ↓
    
 16-bit sine_sample
+   
    ↓
    
 I²S serializer
+   
    ↓
    
 DATA / LRCK / BCLK
+   
    ↓
    
 MAX98357A
+   
    ↓
    
 speaker → 700 Hz

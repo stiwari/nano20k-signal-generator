@@ -5,7 +5,10 @@
     <Version>5</Version>
     <Device name="GW2AR-18C" pn="GW2AR-LV18QN88C7/I6">gw2ar18c-001</Device>
     <FileList>
+        <File path="src/common/block_integrator.v" type="file.verilog" enable="1"/>
         <File path="src/common/fractional_tick.v" type="file.verilog" enable="1"/>
+        <File path="src/common/mixer.v" type="file.verilog" enable="1"/>
+        <File path="src/common/noise_lfsr.v" type="file.verilog" enable="1"/>
         <File path="src/common/synchronizer.v" type="file.verilog" enable="1"/>
         <File path="src/dds/frequency_to_phase.v" type="file.verilog" enable="1"/>
         <File path="src/dds/sine_rom.v" type="file.verilog" enable="1"/>

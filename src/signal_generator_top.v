@@ -59,6 +59,19 @@ module signal_generator_top (
     wire [7:0]  dds_rom_addr;
     wire signed [15:0] sine_sample;
 
+// noise and signal 
+    wire signed [15:0] noise_sample;
+    wire signed [15:0] audio_sample;
+    wire signed [15:0] scaled_sine;
+    wire signed [15:0] scaled_noise;
+    wire signed [16:0] mixed_sample_wide;
+    wire signed [15:0] mixed_sample;
+
+// mix and filter 
+    wire signed [31:0] mixer_product;
+    wire signed [41:0] integrator_sum;
+    wire               integrator_valid;
+
 // i2s stuff to drive MAX for speaker
     localparam [31:0] I2S_HALF_BCLK_INCREMENT =
         32'd977_343_669;
@@ -151,7 +164,7 @@ module signal_generator_top (
         .clk              (clk_27m),
         .reset_n          (reset_n),
         .i2s_half_bclk_ce (i2s_half_bclk_ce),
-        .sample           (sine_sample),
+        .sample           (audio_sample),
         .i2s_bclk         (i2s_bclk),
         .i2s_lrck         (i2s_lrck),
         .i2s_data         (i2s_data)
@@ -162,8 +175,8 @@ module signal_generator_top (
         if (!reset_n) begin
             echo_state        <= ST_IDLE;
             echo_pending_byte <= 8'd0;
-            tx_data      <= 8'd0;
-            tx_start     <= 1'b0;
+            tx_data           <= 8'd0;
+            tx_start          <= 1'b0;
         end else begin
             tx_start <= 1'b0;
 
@@ -171,18 +184,18 @@ module signal_generator_top (
                 ST_IDLE: begin
                     if (rx_valid) begin
                         echo_pending_byte <= rx_data;
-                        echo_state        <= ST_LOAD;
+                        echo_state <= ST_LOAD;
                     end
                 end
 
                 ST_LOAD: begin
                     tx_data <= echo_pending_byte;
-                    echo_state   <= ST_START;
+                    echo_state <= ST_START;
                 end
 
                 ST_START: begin
                     tx_start <= 1'b1;
-                    echo_state    <= ST_WAIT;
+                    echo_state <= ST_WAIT;
                 end
 
                 ST_WAIT: begin
@@ -191,7 +204,7 @@ module signal_generator_top (
                 end
 
                 default: begin
-                    echo_state    <= ST_IDLE;
+                    echo_state <= ST_IDLE;
                     tx_start <= 1'b0;
                 end
             endcase
@@ -229,6 +242,14 @@ waveform_dds dds_inst (
     .sample    (sine_sample)
 );
 
+// Pseudo-random noise source
+noise_lfsr noise_inst (
+    .clk          (clk_27m),
+    .reset_n      (reset_n),
+    .sample_ce    (sample_ce),
+    .noise_sample (noise_sample)
+);
+
 // DDS tuning-word register
 always @(posedge clk_27m or negedge reset_n) begin
     if (!reset_n)
@@ -238,7 +259,7 @@ always @(posedge clk_27m or negedge reset_n) begin
 end
 
 
-// led pwm code
+/* led pwm code
 reg [6:0] led_divider;
 
 always @(posedge clk_27m or negedge reset_n) begin
@@ -251,6 +272,87 @@ always @(posedge clk_27m or negedge reset_n) begin
 end
 
 assign test_led = ~led_divider[6];
+*/
 assign audio_enable = 1'b1;
+
+// Add noise and sine wave together
+assign scaled_noise         = noise_sample >>> 1;
+assign scaled_sine          = sine_sample  >>> 3;
+assign mixed_sample_wide    = scaled_noise + scaled_sine;
+assign mixed_sample         = mixed_sample_wide[15:0];
+assign audio_sample         = mixed_sample;
+
+mixer mixer_inst (
+    .signal_in (audio_sample),
+    .lo_in     (sine_sample),
+    .product   (mixer_product)
+);
+
+block_integrator integrator_inst (
+    .clk        (clk_27m),
+    .reset_n    (reset_n),
+    .sample_ce  (sample_ce),
+    .sample_in  (mixer_product),
+    .sum_out    (integrator_sum),
+    .sum_valid  (integrator_valid)
+);
+
+reg signed [41:0] integrator_latched;
+
+always @(posedge clk_27m or negedge reset_n) begin
+    if (!reset_n)
+        integrator_latched <= 42'sd0;
+    else if (integrator_valid)
+        integrator_latched <= integrator_sum;
+end
+
+// Integrator magnitude
+wire [41:0] integrator_magnitude;
+
+assign integrator_magnitude = integrator_latched[41] ? (~integrator_latched + 1'b1) : integrator_latched;
+
+wire detector_hit;
+assign detector_hit = (integrator_magnitude >= 42'd8_589_934_592);  // 2^33
+
+//assign test_led = ~detector_hit;
+//assign test_led = ~integrator_latched[41];
+
+reg [5:0] window_count;
+reg [5:0] hit_count;
+reg       tone_detected;
+
+always @(posedge clk_27m or negedge reset_n) begin
+    if (!reset_n) begin
+        window_count  <= 6'd0;
+        hit_count     <= 6'd0;
+        tone_detected <= 1'b0;
+    end
+    else if (integrator_valid) begin
+
+        // Count this integration window as a hit
+        // if it exceeded our threshold.
+        if (detector_hit)
+            hit_count <= hit_count + 1'b1;
+
+        // After 32 integration windows, make a decision.
+        if (window_count == 6'd31) begin
+
+            // Tone detected if at least 8 of 32
+            // windows crossed the threshold.
+            if (hit_count >= 6'd8)
+                tone_detected <= 1'b1;
+            else
+                tone_detected <= 1'b0;
+
+            window_count <= 6'd0;
+            hit_count    <= 6'd0;
+        end
+        else begin
+            window_count <= window_count + 1'b1;
+        end
+    end
+end
+
+assign test_led = ~tone_detected;
 
 endmodule
